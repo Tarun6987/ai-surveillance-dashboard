@@ -1,6 +1,4 @@
 # CELL 2 — Write app.py
-# ══════════════════════════════════════
-%%writefile /content/app.py
 import streamlit as st,pandas as pd,numpy as np,warnings,ast
 import plotly.express as px,plotly.graph_objects as go
 import folium;from streamlit_folium import st_folium;from folium.plugins import HeatMap
