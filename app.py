@@ -1,6 +1,6 @@
 import streamlit as st,pandas as pd,numpy as np,warnings,ast
 import plotly.express as px,plotly.graph_objects as go
-import folium;from streamlit_folium import st_folium;from folium.plugins import HeatMap
+
 from sklearn.ensemble import IsolationForest
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
@@ -151,38 +151,47 @@ if pg=="Live Map":
     map_c,city_c=st.columns([7,4])
     with map_c:
         @st.cache_data
-        def build_map(djson,n):
-            dm=pd.read_json(djson);m=folium.Map(location=[41.1579,-8.6291],zoom_start=13,tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",attr="Esri",prefer_canvas=True)
-            m.get_root().html.add_child(folium.Element('<style>.leaflet-container{background:#020812!important}.leaflet-popup-content-wrapper{background:rgba(2,12,30,.95)!important;border:1px solid rgba(0,212,255,.4)!important;border-radius:8px!important}.leaflet-popup-content{margin:10px 14px!important;color:#c8e8ff!important}</style>'))
-            heat=[];samp=dm.sample(min(n,len(dm)),random_state=42)
-            for _,row in samp.iterrows():
-                try:
-                    lat=lon=None
-                    if "LATITUDE" in row and pd.notna(row.get("LATITUDE")):lat,lon=float(row["LATITUDE"]),float(row["LONGITUDE"])
-                    elif "POLYLINE" in row:
-                        p=row["POLYLINE"]
-                        if isinstance(p,str):
-                            try:p=ast.literal_eval(p)
-                            except:p=[]
-                        if len(p)>0:lon,lat=p[-1]
-                    if lat is None:continue
-                    risk=str(row.get("RISK_LEVEL","LOW")).upper();sc=float(row.get("RISK_SCORE",0))
-                    col2={"CRITICAL":"#ff1744","HIGH":"#ff6b35","MEDIUM":"#ffc107","LOW":"#00ff88"}.get(risk,"#00d4ff");sz={"CRITICAL":14,"HIGH":10,"MEDIUM":7,"LOW":5}.get(risk,5)
-                    heat.append([lat,lon,sc/100])
-                    ih=f'<div style="width:{sz*2}px;height:{sz*2}px;border-radius:50%;background:{col2};box-shadow:0 0 {sz*2}px {col2};border:1.5px solid rgba(255,255,255,.4);"></div>'
-                    ph=f'<div style="font-size:11px;min-width:160px;"><b style="color:{col2};">⚠ {risk}</b><br><span style="color:#7ab8e8;">ID:</span> {str(row.get("TRIP_ID","N/A"))[:16]}<br><span style="color:{col2};">Risk: {sc:.0f}/100</span></div>'
-                    folium.Marker([lat,lon],icon=folium.DivIcon(html=ih,icon_size=(sz*2,sz*2),icon_anchor=(sz,sz)),popup=folium.Popup(ph,max_width=200)).add_to(m)
-                    if "POLYLINE" in row:
-                        p2=row["POLYLINE"]
-                        if isinstance(p2,str):
-                            try:p2=ast.literal_eval(p2)
-                            except:p2=[]
-                        if len(p2)>1:folium.PolyLine([(x[1],x[0]) for x in p2],weight={"CRITICAL":2.5,"HIGH":2}.get(risk,1),color=col2,opacity={"CRITICAL":.7,"HIGH":.5}.get(risk,.12)).add_to(m)
-                except:pass
-            if heat:HeatMap(heat,radius=15,blur=20,min_opacity=0.2,gradient={0:"#001f3f",.3:"#00ff88",.6:"#ffc107",.85:"#ff6b35",1:"#ff1744"}).add_to(m)
-            return m
-        sat_map=build_map(df.to_json(),n_map)
-        st_folium(sat_map,width=None,height=430,returned_objects=[],key="map_main")
+        def build_plotly_map(djson,n):
+            dm=pd.read_json(djson)
+            samp=dm.sample(min(n,len(dm)),random_state=42).copy()
+            if "LATITUDE" not in samp.columns:
+                if "POLYLINE" in samp.columns:
+                    def extract_ll(p):
+                        try:
+                            pts=ast.literal_eval(p) if isinstance(p,str) else p
+                            return (pts[-1][1],pts[-1][0]) if pts else (None,None)
+                        except:return (None,None)
+                    samp[["LATITUDE","LONGITUDE"]]=samp["POLYLINE"].apply(lambda p:pd.Series(extract_ll(p)))
+                    samp=samp.dropna(subset=["LATITUDE","LONGITUDE"])
+            samp["LATITUDE"]=pd.to_numeric(samp["LATITUDE"],errors="coerce")
+            samp["LONGITUDE"]=pd.to_numeric(samp["LONGITUDE"],errors="coerce")
+            samp=samp.dropna(subset=["LATITUDE","LONGITUDE"])
+            samp["RISK_LEVEL"]=samp["RISK_LEVEL"].astype(str).str.upper()
+            samp["RISK_SCORE"]=pd.to_numeric(samp.get("RISK_SCORE",0),errors="coerce").fillna(0)
+            samp["TRIP_ID"]=samp["TRIP_ID"].astype(str).str[:14]
+            clr_map={"CRITICAL":"#ff1744","HIGH":"#ff6b35","MEDIUM":"#ffc107","LOW":"#00ff88"}
+            sz_map={"CRITICAL":14,"HIGH":10,"MEDIUM":7,"LOW":5}
+            samp["color"]=samp["RISK_LEVEL"].map(clr_map).fillna("#00d4ff")
+            samp["size"]=samp["RISK_LEVEL"].map(sz_map).fillna(5)
+            fig=go.Figure()
+            for rl,grp in samp.groupby("RISK_LEVEL"):
+                fig.add_trace(go.Scattermap(
+                    lat=grp["LATITUDE"],lon=grp["LONGITUDE"],
+                    mode="markers",name=rl,
+                    marker=dict(size=grp["size"],color=clr_map.get(rl,"#00d4ff"),opacity=0.85),
+                    text=grp["TRIP_ID"]+"<br>Risk: "+grp["RISK_SCORE"].astype(int).astype(str)+"/100",
+                    hovertemplate="<b>%{text}</b><br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<extra>"+rl+"</extra>"
+                ))
+            fig.update_layout(
+                map=dict(style="dark",center=dict(lat=samp["LATITUDE"].mean(),lon=samp["LONGITUDE"].mean()),zoom=11),
+                paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(t=0,b=0,l=0,r=0),height=430,
+                legend=dict(bgcolor="rgba(0,15,40,.8)",bordercolor="rgba(0,212,255,.3)",borderwidth=1,font=dict(color="#c8e8ff",size=10)),
+                font=dict(color="#c8e8ff")
+            )
+            return fig
+        fig_map=build_plotly_map(df.to_json(),n_map)
+        st.plotly_chart(fig_map,use_container_width=True,config={"displayModeBar":False},key="map_main")
         live_stats="".join([f'<span style="color:#7ab8e8;">{"🔴" if l=="CRITICAL" else "🟠" if l=="HIGH" else "🟡" if l=="MEDIUM" else "🟢"} {l}: <b style="color:{C[l]};">{v}</b></span>'for l,v in[("CRITICAL",crit),("HIGH",high),("MEDIUM",med),("LOW",low)]])
         st.markdown('<div style="background:rgba(0,15,40,.95);border:1px solid rgba(0,212,255,.2);border-top:none;border-radius:0 0 8px 8px;padding:5px 14px;display:flex;gap:12px;align-items:center;font-size:9px;flex-wrap:wrap;"><span style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,255,136,.08);border:1px solid rgba(0,255,136,.3);border-radius:4px;padding:2px 8px;color:#00ff88;font-weight:700;font-family:Orbitron;font-size:8px;"><div class="ld"></div>LIVE</span>'+live_stats+f'<span style="color:#7ab8e8;margin-left:auto;">Showing:<b style="color:#00d4ff;"> {min(n_map,tot):,}</b> · Avg Risk:<b style="color:#ffc107;"> {avg_r}</b></span></div>',unsafe_allow_html=True)
     with city_c:
