@@ -1,4 +1,5 @@
 import streamlit as st,pandas as pd,numpy as np,warnings,ast
+from io import StringIO
 import plotly.express as px,plotly.graph_objects as go
 
 from sklearn.ensemble import IsolationForest
@@ -152,7 +153,7 @@ if pg=="Live Map":
     with map_c:
         @st.cache_data
         def build_plotly_map(djson,n):
-            dm=pd.read_json(djson)
+            dm=pd.read_json(StringIO(djson))
             samp=dm.sample(min(n,len(dm)),random_state=42).copy()
             if "LATITUDE" not in samp.columns:
                 if "POLYLINE" in samp.columns:
