@@ -13,6 +13,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime
+import gc
 warnings.filterwarnings("ignore")
 
 st.set_page_config(
@@ -248,7 +249,7 @@ if _found is None:
         st.success("✅ Uploaded! Refreshing..."); st.rerun()
     st.stop()
 
-@st.cache_data
+@st.cache_data(max_entries=1)
 def load_data():
     df, _ = find_csv()
     df.columns = df.columns.str.upper().str.strip()
@@ -600,6 +601,7 @@ with tab_ml:
     iso=IsolationForest(contamination=cont,random_state=42,n_estimators=50)
     iso.fit(_scaler.transform(_if_sample))
     df["IF_LABEL"]=iso.predict(X_s)
+    gc.collect()
     df["IF_RESULT"]=df["IF_LABEL"].map({1:"Normal",-1:"Anomaly"})
     df["ANOMALY_SCORE"]=(-iso.decision_function(X_s)).round(4)
     norm_cnt=(df["IF_RESULT"]=="Normal").sum(); anom_cnt=(df["IF_RESULT"]=="Anomaly").sum()
@@ -633,11 +635,20 @@ with tab_ml:
     st.markdown("---")
     st.markdown("**🧠 DBSCAN Clustering**")
     CLUST_F=[c for c in ["AVG_SPEED_KMH","RISK_SCORE","TRIP_DISTANCE","CIRCUITY_RATIO","RZ_HIT_COUNT"] if c in df.columns]
-    X_db=StandardScaler().fit_transform(df[CLUST_F].fillna(0))
+    # Cap DBSCAN to 3000 rows — prevents O(n²) memory explosion on free tier
+    _db_n = min(3000, len(df))
+    _db_idx = df.sample(_db_n, random_state=42).index
+    _db_data = df.loc[_db_idx, CLUST_F].fillna(0)
+    X_db = StandardScaler().fit_transform(_db_data)
     dc1,dc2=st.columns(2)
     eps_v=dc1.slider("Epsilon",0.3,3.0,0.8,0.1)
     mns_v=dc2.slider("Min Samples",3,20,5,1)
-    df["Cluster"]=DBSCAN(eps=eps_v,min_samples=mns_v).fit_predict(X_db)
+    _db_labels = DBSCAN(eps=eps_v,min_samples=mns_v).fit_predict(X_db)
+    df["Cluster"] = "No Cluster"  # default
+    df.loc[_db_idx, "Cluster_raw"] = _db_labels
+    # Map labels back via the sampled index
+    df["Cluster_raw"] = df.get("Cluster_raw", -1)
+    gc.collect()
     df["Cluster"]=df["Cluster"].apply(lambda x:"Noise" if x==-1 else f"C-{x}")
     cl_cnt=len([c for c in df["Cluster"].unique() if c!="Noise"])
     db1,db2=st.columns(2)
