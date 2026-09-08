@@ -252,6 +252,11 @@ if _found is None:
 def load_data():
     df, _ = find_csv()
     df.columns = df.columns.str.upper().str.strip()
+    # Downcast numerics to float32/int32 to halve memory usage
+    for col in df.select_dtypes(include="float64").columns:
+        df[col] = df[col].astype("float32")
+    for col in df.select_dtypes(include="int64").columns:
+        df[col] = df[col].astype("int32")
     for c in ["DATETIME","TIMESTAMP"]:
         if c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce")
@@ -585,12 +590,16 @@ with tab_ml:
     IF_FEAT=[c for c in ["AVG_SPEED_KMH","RISK_SCORE","CIRCUITY_RATIO","AVG_BEARING_CHANGE",
         "PARKING_DURATION_MIN","SPEED_SPIKES","RZ_HIT_COUNT","STD_SPEED","TRIP_DISTANCE","TRAVEL_TIME"]
         if c in df.columns]
+    # Sample for fitting to stay within 512MB RAM limit
+    _if_sample = df[IF_FEAT].fillna(0).sample(min(5000,len(df)), random_state=42)
     X_if=df[IF_FEAT].fillna(0)
-    X_s=StandardScaler().fit_transform(X_if)
+    _scaler = StandardScaler().fit(_if_sample)
+    X_s=_scaler.transform(X_if)
     mc1,mc2=st.columns([1,3])
     cont=mc1.slider("Contamination % (default: 5%)",1,20,5,1)/100
-    iso=IsolationForest(contamination=cont,random_state=42,n_estimators=150)
-    df["IF_LABEL"]=iso.fit_predict(X_s)
+    iso=IsolationForest(contamination=cont,random_state=42,n_estimators=50)
+    iso.fit(_scaler.transform(_if_sample))
+    df["IF_LABEL"]=iso.predict(X_s)
     df["IF_RESULT"]=df["IF_LABEL"].map({1:"Normal",-1:"Anomaly"})
     df["ANOMALY_SCORE"]=(-iso.decision_function(X_s)).round(4)
     norm_cnt=(df["IF_RESULT"]=="Normal").sum(); anom_cnt=(df["IF_RESULT"]=="Anomaly").sum()
@@ -740,4 +749,3 @@ border-top:1px solid rgba(0,212,255,0.15);margin-top:6px;">
 AI POWERED SMART SURVEILLANCE v4.0 &nbsp;|&nbsp; </span>
 <span style="font-size:9px;color:#7ab8e8;">Python · Streamlit · Plotly · Folium · Scikit-Learn · MQTT · Cloudflare</span>
 </div>""", unsafe_allow_html=True)
-x
