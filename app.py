@@ -464,7 +464,8 @@ with analytics_col:
         textfont=dict(color="white",size=10),
         textposition="outside", textinfo="percent"
     ))
-    fig_donut.update_layout(**PLT, height=170,
+    _plt_donut = {k:v for k,v in PLT.items() if k != "legend"}
+    fig_donut.update_layout(**_plt_donut, height=170,
         annotations=[dict(text=f"<b>{total:,}</b><br><span style='font-size:9px;'>Total</span>",
                          x=0.5,y=0.5,font=dict(size=14,color="white"),showarrow=False)],
         showlegend=True,
