@@ -214,9 +214,21 @@ AX = dict(gridcolor="rgba(0,212,255,0.08)", color="#7ab8e8", tickfont=dict(color
 now_str = datetime.now().strftime("%d %b %Y  %H:%M:%S IST")
 
 def find_csv():
-    for n in ["dashboard_dataset.csv","surveillance_features.csv","data.csv"]:
-        try: return pd.read_csv(n), n
-        except: continue
+    import os
+    # Search in current dir AND common Streamlit Cloud / Colab paths
+    search_dirs = [
+        "",                                    # current working dir
+        "/mount/src/ai-surveillance-dashboard/",  # Streamlit Cloud
+        "/content/",                           # Google Colab
+        os.path.dirname(os.path.abspath(__file__)),  # same dir as app.py
+    ]
+    for d in search_dirs:
+        for n in ["surveillance_features.csv","dashboard_dataset.csv","data.csv"]:
+            path = os.path.join(d, n) if d else n
+            try:
+                df = pd.read_csv(path)
+                return df, path
+            except: continue
     return None, None
 
 # ==========================================================
@@ -728,3 +740,4 @@ border-top:1px solid rgba(0,212,255,0.15);margin-top:6px;">
 AI POWERED SMART SURVEILLANCE v4.0 &nbsp;|&nbsp; </span>
 <span style="font-size:9px;color:#7ab8e8;">Python · Streamlit · Plotly · Folium · Scikit-Learn · MQTT · Cloudflare</span>
 </div>""", unsafe_allow_html=True)
+x
